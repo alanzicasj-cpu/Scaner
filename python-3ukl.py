@@ -52,7 +52,7 @@ def criar_exchange():
 
 
 def get_anomaly_detection() -> None:
-    print("Cruzando bases para achar ativos em comum e anomalias de volume...")
+    print("Cruzando bases (OKX + CoinGecko) para achar ativos em comum e anomalias de volume...")
     bases_segunda_fonte = buscar_bases_coingecko(top_n=120)
 
     exchange = criar_exchange()
