@@ -31,7 +31,6 @@ def enviar_telegram(mensagem: str) -> None:
 
 
 def buscar_bases_coingecko(top_n: int = 120) -> set[str]:
-    """Busca os símbolos base (ex.: BTC, ETH, SOL) das top moedas por volume no CoinGecko."""
     url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {
         "vs_currency": "usd",
@@ -53,13 +52,12 @@ def criar_exchange():
 
 
 def get_anomaly_detection() -> None:
-    print("Cruzando bases (OKX + CoinGecko) para achar ativos em comum e anomalias de volume...")
+    print("Cruzando bases para achar ativos em comum e anomalias de volume...")
     bases_segunda_fonte = buscar_bases_coingecko(top_n=120)
 
     exchange = criar_exchange()
     markets = exchange.load_markets()
 
-    # Regra: ativo USDT na OKX que também aparece na segunda base (interseção)
     simbolos_em_comum = [
         symbol for symbol, market in markets.items()
         if (
@@ -114,7 +112,7 @@ def get_anomaly_detection() -> None:
 
 
 if __name__ == "__main__":
-    enviar_telegram("🤖 Scanner com filtro de 2 bases iniciado no Railway!")
+    enviar_telegram("🤖 Scanner iniciado no Railway!")
 
     while True:
         try:
