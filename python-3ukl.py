@@ -1,39 +1,92 @@
-import ccxt
-import pandas as pd
+import os
 import time
+import ccxt
+import requests
 
-# Configurações de API (Apenas leitura, não precisa de chaves privadas para scan)
-exchange = ccxt.binance()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-def get_anomaly_detection():
-    print("Escaneando mercado em busca de anomalias de volume...")
-    
-    # Busca todos os pares de USDT
+VOLUME_MULTIPLIER = 3.0
+INTERVALO_SEGUNDOS = 300
+TIMEFRAME = "5m"
+LIMITE_PARES = 40
+
+
+def enviar_telegram(mensagem: str) -> None:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Aviso: TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não configurados.")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensagem,
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=15)
+        if not resp.ok:
+            print(f"Erro ao enviar no Telegram: {resp.status_code} - {resp.text}")
+    except Exception as e:
+        print(f"Exceção ao enviar no Telegram: {e}")
+
+
+def criar_exchange():
+    return ccxt.bybit({
+        "enableRateLimit": True,
+    })
+
+
+def get_anomaly_detection() -> None:
+    print("Escaneando mercado na Bybit em busca de anomalias de volume...")
+    exchange = criar_exchange()
     markets = exchange.load_markets()
-    symbols = [symbol for symbol in markets if '/USDT' in symbol]
-    
-    for symbol in symbols:
-        try:
-            # Busca candles de 1 minuto
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1m', limit=60)
-            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            
-            # Cálculo Matemático
-            current_volume = df['volume'].iloc[-1]
-            avg_volume = df['volume'].iloc[-60:-1].mean()
-            price_change = ((df['close'].iloc[-1] - df['close'].iloc[-2]) / df['close'].iloc[-2]) * 100
-            
-            # Critério: Volume 5x maior que a média E alta de preço > 0.5% no minuto
-            if current_volume > (avg_volume * 5) and price_change > 0.5:
-                print(f"🚨 ALERTA DE PUMP: {symbol}")
-                print(f"Volume Atual: {current_volume:.2f} | Média: {avg_volume:.2f}")
-                print(f"Variação no minuto: {price_change:.2f}%")
-                print("-" * 30)
-                
-        except Exception:
-            continue
 
-# Loop de execução a cada 30 segundos
-while True:
-    get_anomaly_detection()
-    time.sleep(30)
+    simbolos_usdt = [
+        symbol for symbol, market in markets.items()
+        if market.get("active") and market.get("quote") == "USDT" and market.get("spot")
+    ][:LIMITE_PARES]
+
+    alertas = []
+
+    for symbol in simbolos_usdt:
+        try:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=22)
+            if not ohlcv or len(ohlcv) < 6:
+                continue
+
+            ultimo_candle = ohlcv[-1]
+            volume_atual = ultimo_candle[5] or 0
+            preco_atual = ultimo_candle[4] or 0
+
+            volumes_anteriores = [c[5] for c in ohlcv[:-1] if c[5] is not None]
+            if not volumes_anteriores:
+                continue
+
+            media_volume = sum(volumes_anteriores) / len(volumes_anteriores)
+            if media_volume > 0 and volume_atual >= media_volume * VOLUME_MULTIPLIER:
+                ratio = volume_atual / media_volume
+                alertas.append(
+                    f"• {symbol} | Preço: {preco_atual} | Vol: {ratio:.1f}x a média"
+                )
+        except Exception as e:
+            print(f"Erro ao analisar {symbol}: {e}")
+            time.sleep(0.2)
+
+    if alertas:
+        msg = "🚨 Anomalias de volume na Bybit:\n\n" + "\n".join(alertas)
+        print(msg)
+        enviar_telegram(msg)
+    else:
+        print("Nenhuma anomalia de volume encontrada neste ciclo.")
+
+
+if __name__ == "__main__":
+    enviar_telegram("🤖 Scanner Bybit iniciado no Railway!")
+
+    while True:
+        try:
+            get_anomaly_detection()
+        except Exception as e:
+            erro_msg = f"⚠️ Erro no ciclo do scanner: {e}"
+            print(erro_msg)
+        time.sleep(INTERVALO_SEGUNDOS)
