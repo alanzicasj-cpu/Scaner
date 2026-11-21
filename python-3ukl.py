@@ -77,7 +77,12 @@ def get_anomaly_detection() -> None:
         print(msg)
         enviar_telegram(msg)
     else:
-        print("Nenhuma anomalia de volume encontrada neste ciclo.")
+        msg = (
+            f"✅ Ciclo concluído ({TIMEFRAME}): nenhuma anomalia de volume "
+            f"({VOLUME_MULTIPLIER:.1f}x) encontrada nos {len(simbolos_usdt)} pares."
+        )
+        print(msg)
+        enviar_telegram(msg)
 
 
 if __name__ == "__main__":
@@ -89,4 +94,5 @@ if __name__ == "__main__":
         except Exception as e:
             erro_msg = f"⚠️ Erro no ciclo do scanner: {e}"
             print(erro_msg)
+            enviar_telegram(erro_msg)
         time.sleep(INTERVALO_SEGUNDOS)
