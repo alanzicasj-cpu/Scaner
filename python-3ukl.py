@@ -30,25 +30,49 @@ def enviar_telegram(mensagem: str) -> None:
         print(f"Exceção ao enviar no Telegram: {e}")
 
 
+def buscar_bases_coingecko(top_n: int = 120) -> set[str]:
+    """Busca os símbolos base (ex.: BTC, ETH, SOL) das top moedas por volume no CoinGecko."""
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "order": "volume_desc",
+        "per_page": top_n,
+        "page": 1,
+        "sparkline": "false",
+    }
+    resp = requests.get(url, params=params, timeout=20)
+    resp.raise_for_status()
+    dados = resp.json()
+    return {item.get("symbol", "").upper() for item in dados if item.get("symbol")}
+
+
 def criar_exchange():
-    return ccxt.bybit({
+    return ccxt.okx({
         "enableRateLimit": True,
     })
 
 
 def get_anomaly_detection() -> None:
-    print("Escaneando mercado na Bybit em busca de anomalias de volume...")
+    print("Cruzando bases (OKX + CoinGecko) para achar ativos em comum e anomalias de volume...")
+    bases_segunda_fonte = buscar_bases_coingecko(top_n=120)
+
     exchange = criar_exchange()
     markets = exchange.load_markets()
 
-    simbolos_usdt = [
+    # Regra: ativo USDT na OKX que também aparece na segunda base (interseção)
+    simbolos_em_comum = [
         symbol for symbol, market in markets.items()
-        if market.get("active") and market.get("quote") == "USDT" and market.get("spot")
+        if (
+            market.get("active")
+            and market.get("quote") == "USDT"
+            and market.get("spot")
+            and str(market.get("base", "")).upper() in bases_segunda_fonte
+        )
     ][:LIMITE_PARES]
 
     alertas = []
 
-    for symbol in simbolos_usdt:
+    for symbol in simbolos_em_comum:
         try:
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=22)
             if not ohlcv or len(ohlcv) < 6:
@@ -73,20 +97,24 @@ def get_anomaly_detection() -> None:
             time.sleep(0.2)
 
     if alertas:
-        msg = "🚨 Anomalias de volume na Bybit:\n\n" + "\n".join(alertas)
+        msg = (
+            "🚨 Anomalias em ativos filtrados nas 2 bases:\n\n"
+            + "\n".join(alertas)
+            + "\n\nConfirme visualmente na corretora."
+        )
         print(msg)
         enviar_telegram(msg)
     else:
         msg = (
-            f"✅ Ciclo concluído ({TIMEFRAME}): nenhuma anomalia de volume "
-            f"({VOLUME_MULTIPLIER:.1f}x) encontrada nos {len(simbolos_usdt)} pares."
+            f"✅ Ciclo concluído ({TIMEFRAME}): nenhuma anomalia ({VOLUME_MULTIPLIER:.1f}x) "
+            f"nos {len(simbolos_em_comum)} ativos filtrados nas 2 bases."
         )
         print(msg)
         enviar_telegram(msg)
 
 
 if __name__ == "__main__":
-    enviar_telegram("🤖 Scanner Bybit iniciado no Railway!")
+    enviar_telegram("🤖 Scanner com filtro de 2 bases iniciado no Railway!")
 
     while True:
         try:
